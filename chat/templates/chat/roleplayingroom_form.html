@@ -1,0 +1,17 @@
+{% extends "chat/base.html" %}
+{% load django_bootstrap5 %}
+
+{% block content %}
+    <div class="card border-dark">
+        <form action="" method="post" novalidate>
+            {% csrf_token %}
+            <div class="card-header">
+                Situation {% if form.instance.pk %}Edit{% else %}Create{% endif %}
+            </div>
+            <div class="card-body">{% bootstrap_form form layout="horizontal" %}</div>
+            <div class="card-footer text-end">
+                <input type="submit" value="Save" class="btn btn-primary" />
+            </div>
+        </form>
+    </div>
+{% endblock %}

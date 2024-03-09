@@ -1,0 +1,165 @@
+{% extends "chat/base.html" %}
+
+{% block extra-css %}
+<style>
+    #chat-message-list {
+        padding: 0;
+        list-style: none;
+    }
+    .chat-message .message {
+        background-color: #3b3b3d;
+        color: #e1e1e1;
+        border-radius: 0.8em;
+        padding: 0.4em;
+        margin: 0.4em 0;
+        display: inline-block;
+        white-space: pre-wrap;
+    }
+
+    .chat-message.me {
+        text-align: right;
+    }
+    .chat-message.me .message {
+        background-color: #1f8cff;
+        color: #fff;
+        text-align: left;
+    }
+    .chat-message .say {
+        display: block;
+        font-size: .8em;
+        margin-top: -0.4em;
+        margin-left: 0.2em;
+        cursor: pointer;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+    <div class="row">
+        <div class="col-sm-12">
+            <div class="card">
+                <div class="card-header">
+                    [{{ roleplayingroom.get_language_display }}
+                    {{ roleplayingroom.get_level_display }}]
+                    {{ roleplayingroom.situation }}
+                    (Conversation with {{ roleplayingroom.gpt_role }}and {{ roleplayingroom.my_role }})
+                </div>
+                <div class="card-body">
+                    <ul id="chat-message-list"></ul>
+                </div>
+                <div class="card-footer">
+                    <div class="d-grid gap-2 mb-2">
+                        <button id="auto-play-button" class="btn btn-primary">
+                            Automatic Reading Start
+                        </button>
+                    </div>
+                    <div class="d-flex gap-2">
+                        <button class="btn btn-secondary" id="recommend-button">Recommendation</button>
+                        <form id="message-form" class="d-flex gap-1 flex-grow-1">
+                            <input type="text"
+                                   name="message"
+                                   placeholder="Type Message."
+                                   class="form-control flex-grow-1" />
+                        </form>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    <div class="my-3">
+        <a href="{% url 'role_playing_room_edit' roleplayingroom.pk %}"
+           class="btn btn-primary">Edit</a>
+        <a href="{% url 'role_playing_room_delete' roleplayingroom.pk %}"
+           class="btn btn-danger">Delete</a>
+    </div>
+{% endblock %}
+
+{% block script %}
+{{ roleplayingroom.pk|json_script:"room-pk" }}
+{{ roleplayingroom.language|json_script:"room-language" }}
+
+<script>
+function sayMessage(message, language) {
+    const lang = language.split("-")[0];  // en-US => en
+    const voiceUrl = `/voice/?message=${encodeURIComponent(message)}&lang=${lang}`;
+    const audio = new Audio();
+    audio.src = voiceUrl;
+    audio.play();
+}
+
+function addMessage(message, isMe) {
+    const messageList = document.getElementById("chat-message-list");
+    const messageElement = document.createElement("li");
+    messageElement.className = "chat-message" + (isMe ? " me" : "");
+    messageElement.innerHTML = `
+        <span class="message">${message}</span>
+        <span class="say">Read</span>
+    `;
+    messageList.appendChild(messageElement);
+    messageList.scrollTop = messageList.scrollHeight;
+
+    messageElement.querySelector(".say").addEventListener("click", () => {
+      sayMessage(message, room_language);
+    });
+}
+
+let is_auto_play = false;
+const room_pk = document.querySelector("#room-pk").textContent;
+const room_language = JSON.parse(document.querySelector("#room-language").textContent);
+const ws = new WebSocket(`ws://${window.location.host}/ws/chat/${room_pk}/`);
+
+ws.onopen = function(e) { console.log("A websocket connection is established with the Django Channels server."); };
+ws.onclose = function(e) { console.log("Django Channels server and websocket are disconnected."); };
+ws.onerror = function(e) { console.error("An error occurred during a websocket connection to the Django Channels server.", e); };
+
+ws.onmessage = function(e) {
+  console.group("[onmessage]");
+
+  const message_obj = JSON.parse(e.data);
+
+  if ( message_obj.type === "assistant-message" ) {
+    const { message } = message_obj;
+    console.log("assistant-message :", message);
+    addMessage(message, false);
+    if ( is_auto_play ) {
+      sayMessage(message, room_language);
+    }
+  }
+  else if ( message_obj.type === "recommended-message" ) {
+    const { message } = message_obj;
+    console.log("recommended-message :", message);
+    document.querySelector("#message-form [name='message']").value = message;
+    recommendButton.disabled = false;
+  }
+  else {
+    console.error("Message type Unknown.", message_obj);
+  }
+
+  console.groupEnd();
+};
+
+const messageForm = document.querySelector("#message-form");
+messageForm.onsubmit = function(e) {
+  e.preventDefault();
+  const message = e.target.message.value.trim();
+  if(message.length > 0) {
+    addMessage(message, true);
+    ws.send(JSON.stringify({ type: "user-message", message: message }));
+    e.target.reset();
+  }
+};
+
+const recommendButton = document.querySelector("#recommend-button");
+recommendButton.addEventListener("click", () => {
+  recommendButton.disabled = true;
+  ws.send(JSON.stringify({ type: "request-recommend-message" }));
+});
+
+const autoPlayButton = document.querySelector("#auto-play-button");
+autoPlayButton.addEventListener("click", () => {
+  is_auto_play = true;
+  autoPlayButton.remove();
+});
+</script>
+
+{% endblock %}
